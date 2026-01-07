@@ -1,0 +1,33 @@
+# 本番用 Dockerfile (standalone)
+# ステージ1: ビルダー
+FROM ghcr.io/astral-sh/uv:bookworm-slim AS builder
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+ENV UV_NO_DEV=1
+# uvが管理するPythonを使用
+ENV UV_PYTHON_INSTALL_DIR=/python
+ENV UV_PYTHON_PREFERENCE=only-managed
+# Python をインストール
+RUN uv python install 3.12
+WORKDIR /app
+# 依存関係のインストール
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked
+# ステージ2: 本番イメージ
+FROM debian:bookworm-slim
+# 非rootユーザーの作成
+RUN groupadd --system --gid 999 nonroot \
+ && useradd --system --gid 999 --uid 999 --create-home nonroot
+# Python をコピー
+COPY --from=builder --chown=nonroot:nonroot /python /python
+# アプリケーションをコピー
+COPY --from=builder --chown=nonroot:nonroot /app /app
+ENV PATH="/app/.venv/bin:$PATH"
+USER nonroot
+WORKDIR /app
+# 本番モードで起動
+CMD ["fastapi", "run", "--host", "0.0.0.0", "src/backend"]

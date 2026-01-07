@@ -1,0 +1,25 @@
+services:
+  # 開発用
+  dev:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - UV_NO_DEV=0  # 開発依存を含める
+      
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+          ignore:
+            - .venv/
+        - action: rebuild
+          path: ./uv.lock
+  # 本番用
+  prod:
+    build:
+      context: .
+      dockerfile: dockerfile.prod
+    ports:
+      - "8000:8000"
