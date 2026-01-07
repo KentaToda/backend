@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Environment variables (秘匿情報)
+.env
+
+google_credentials.json

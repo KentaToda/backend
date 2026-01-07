@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from mangum import Mangum  # Lambda用ハンドラ
 
 from backend.core.config import settings
 from backend.api.v1.router import api_router
@@ -15,9 +14,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 @app.get("/")
 def root():
     return {"message": "Welcome to Ojoya API"}
-
-# AWS Lambda用のハンドラ
-handler = Mangum(app)
+    
 
 # ローカルデバッグ用 (python app/main.py で起動する場合)
 if __name__ == "__main__":
