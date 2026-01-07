@@ -6,9 +6,10 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # Google Cloud Vertex AI 設定
-    GCP_PROJECT_ID: str  # .envで設定必須
-    GCP_LOCATION: str = "us-central1"
-    VERTEX_AI_MODEL_ID: str = "gemini-2.5-flash"
+    GCP_PROJECT_ID: str     # .envで設定必須
+    GCP_LOCATION: str       # .envで設定必須
+
+    MODEL_VISION_NODE:str   # .envで設定必須
 
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 
