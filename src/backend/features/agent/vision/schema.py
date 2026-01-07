@@ -1,13 +1,13 @@
 from typing import Literal, Optional, List
 from pydantic import BaseModel, Field
 
-CategoryType = Literal["mass_product", "unique_item", "unknown", "prohibited"]
+CategoryType = Literal["processable", "unknown", "prohibited"]
 
 class InitialAnalysis(BaseModel):
     """画像分析の出力スキーマ"""
     category_type: CategoryType = Field(
         ..., 
-        description="画像の分類結果。既製品(mass_product)、一点物/工芸品(unique_item)、不明(unknown)、禁止物(prohibited)から選択"
+        description="画像の分類結果。査定可能(processable)、不明(unknown)、禁止物(prohibited)から選択"
     )
     item_name: Optional[str] = Field(
         None, 

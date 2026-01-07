@@ -31,29 +31,30 @@ graph TD
         NodeA_Init --> CheckType{カテゴリ判定}
 
         %% A. ガードレール
-        CheckType -- "人物/生物/現金" --> GuardRail[対象外判定]:::guard
+        CheckType -- "prohibited" --> GuardRail[対象外判定]:::guard
         GuardRail --> End_Guard(["エラー: 査定対象外です"]):::endstate
 
         %% B. 特定不可 (Retry Max 5)
-        CheckType -- "不明/ピンボケ" --> RetryCheck{Retry < 5 ?}:::logic
+        CheckType -- "unknown" --> RetryCheck{Retry < 5 ?}:::logic
         RetryCheck -- Yes --> CountUp[Retry + 1]:::logic
         CountUp --> AskReshoot[再撮影依頼 & ヒント提示]:::user
         AskReshoot --> NodeA_Init
         RetryCheck -- No --> End_GiveUp(["エラー: 特定不能として終了"]):::endstate
     end
 
-    %% --- Phase 2: 特注品フロー (Human-in-the-Loop) ---
-    subgraph Phase2 [Phase 2: Unique / Hand-made Flow]
-        CheckType -- "特注品/工芸品" --> ExtractFeat(Node A: 構成要素抽出):::vision
+    %% --- Phase 2: 画像検索フロー ---
+    subgraph Phase2 [Phase 2: Image Search & Classification]
+        CheckType -- "processable" --> NodeB_Search(Node B: 画像検索):::search
+        NodeB_Search --> ClassifyType{画像検索結果で分類}
+        
+        %% 特注品/一点物フロー
+        ClassifyType -- "unique_item" --> ExtractFeat(Node A: 構成要素抽出):::vision
         ExtractFeat --> ShowDraft[ドラフト提示 & ユーザー補正フォーム]:::user
         ShowDraft -->|ユーザー入力確定| NodeB_Proxy(Node B: 素材・類似スペック検索):::search
         NodeB_Proxy --> End_Unique(["推定価値提示 (類似品ベース)"]):::endstate
-    end
-
-    %% --- Phase 3: 既製品フロー (Dynamic Focus & Hint) ---
-    subgraph Phase3 [Phase 3: Mass Product Flow]
-        CheckType -- "既製品/流通品" --> NodeB_Broad(Node B: 市場調査 & 要因特定):::search
-        NodeB_Broad --> NodeC_Schema(Node C: チェックリスト生成):::logic
+        
+        %% 既製品フロー
+        ClassifyType -- "mass_product" --> NodeC_Schema(Node C: チェックリスト生成):::logic
         
         %% 質問ループ初期化
         NodeC_Schema --> InitQCount{Q_Count = 0}:::logic
@@ -128,9 +129,10 @@ graph TD
 
 ```json
 {
-  "category_type": "mass_product", // mass_product | unique_item | unknown | prohibited
+  "category_type": "processable", // processable | unknown | prohibited
   "item_name": "Pokemon Card Charizard",
-  "guardrail_reason": null, // prohibitedの場合に理由が入る
+  "confidence": "high",
+  "reasoning": "トレーディングカードと判定",
   "retry_advice": null // unknownの場合に「もっと明るく」等が入る
 }
 
