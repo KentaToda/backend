@@ -19,8 +19,8 @@ RUN chown nonroot:nonroot /app
 # ここで nonroot に切り替え
 USER nonroot
 
-# 依存関係のインストール（キャッシュ最適化）
-RUN --mount=type=cache,target=/root/.cache/uv \
+# 依存関係のインストール
+RUN --mount=type=cache,target=/home/nonroot/.cache/uv,uid=999,gid=999 \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project
