@@ -35,4 +35,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENTRYPOINT []
 
 # 開発モードで起動
-CMD ["uv", "run", "fastapi", "dev", "--host", "0.0.0.0", "src/backend"]
+CMD ["uv", "run", "fastapi", "dev", "--host", "0.0.0.0", "src/backend/main.py"]

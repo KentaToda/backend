@@ -30,4 +30,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 USER nonroot
 WORKDIR /app
 # 本番モードで起動
-CMD ["fastapi", "run", "--host", "0.0.0.0", "src/backend"]
+CMD ["fastapi", "run", "--host", "0.0.0.0", "src/backend/main.py"]
