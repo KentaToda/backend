@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     GCP_PROJECT_ID: str     # .envで設定必須
     GCP_LOCATION: str       # .envで設定必須
 
-    MODEL_VISION_NODE:str   # .envで設定必須
+    MODEL_VISION_NODE: str   # .envで設定必須
+    MODEL_SEARCH_NODE: str
 
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 

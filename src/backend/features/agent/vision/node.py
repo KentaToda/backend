@@ -1,4 +1,4 @@
-from langchain_google_genai import ChatGoogleGenerativeAI 
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage
 
 from backend.features.agent.vision.schema import InitialAnalysis
@@ -12,7 +12,8 @@ def vision_node(state: "AgentState"):
         project=settings.GCP_PROJECT_ID,
         location=settings.GCP_LOCATION,
         temperature=0,
-        max_retries=2
+        max_retries=2,
+        vertexai=True,
     )
     
     # 構造化出力を強制する (Geminiもこのメソッドに対応しています)
@@ -30,6 +31,18 @@ def vision_node(state: "AgentState"):
     3. processable (査定可能):
        - 上記に該当しない、査定対象として有効な商品画像。
        - 既製品か一点物かは画像検索後に判断するため、この段階では区別しない。
+
+    【processableの場合の追加タスク】
+    査定可能と判断した場合は、以下も抽出してください:
+    - item_name: 商品名を推定（例: "Louis Vuitton モノグラム ネヴァーフル MM"、"SEIKO プレザージュ SARX035"）
+      - ブランド名がわかる場合は必ず含める
+      - 型番がわかる場合は含める
+    - visual_features: 視覚的特徴をリストで抽出
+      - ブランドロゴ、刻印
+      - 色、素材、形状
+      - サイズ感（大/中/小）
+      - 状態（新品同様、使用感あり等）
+      - その他の特徴的な要素
     """
 
     # メッセージ構築

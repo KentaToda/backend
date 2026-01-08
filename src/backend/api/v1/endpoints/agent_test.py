@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.features.agent.graph import run_agent, run_vision_agent
+from backend.features.agent.graph import run_agent, run_vision_agent, run_search_agent
 
 router = APIRouter()
 
@@ -78,4 +78,41 @@ async def test_vision_agent(request: AgentVisionRequest):
     except Exception as e:
         print(f"Error executing vision agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
+@router.post("/agent/search_test")
+async def test_search_agent(request: AgentVisionRequest):
+    """
+    画像検索エージェントのテスト用エンドポイント
+
+    vision_node → search_node の一連フローをテスト
+    - processableの場合: vision分析 + 画像検索 + 分類判定を実行
+    - それ以外の場合: vision分析のみ実行（search_outputはNone）
+    """
+    try:
+        image_content = request.image_data
+
+        if request.file_path:
+            if not os.path.exists(request.file_path):
+                raise HTTPException(
+                    status_code=400, detail=f"File not found: {request.file_path}"
+                )
+
+            mime_type, _ = mimetypes.guess_type(request.file_path)
+            if not mime_type:
+                mime_type = "image/jpeg"
+
+            with open(request.file_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                image_content = f"data:{mime_type};base64,{encoded_string}"
+
+        if not image_content:
+            raise HTTPException(
+                status_code=400, detail="Either image_data or file_path must be provided"
+            )
+
+        result = await run_search_agent(image_content)
+        return result
+    except Exception as e:
+        print(f"Error executing search agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
