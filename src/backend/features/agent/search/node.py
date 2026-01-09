@@ -77,9 +77,10 @@ def search_node(state: AgentState) -> dict:
 1. classification: "mass_product" または "unique_item"
 2. confidence: "high", "medium", "low" のいずれか
 3. reasoning: 判定に至った理由（検索で見つかった情報を含める）
-4. identified_product: 既製品の場合、正式な商品名を出力（例: "NIKE Free RN Flyknit 2018 メンズ ランニングシューズ"）
+4. identified_product: 既製品の場合、商品名と属性をカンマ区切りで出力。括弧は使用しない
    - vision_nodeで推定された商品名「{item_name or "不明"}」を検索で確認・補完する
-   - 型番、サイズ、カラー名なども特定できれば含める
+   - 型番、カラー名、サイズなどを特定できれば含める
+   - 例: "NIKE Free RN Flyknit, 赤", "NIKE Free RN Flyknit 2018, 黒, 27.0cm"
    - 一点物の場合は null
 
 【注意事項】

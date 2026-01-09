@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from backend.features.agent.state import AgentState
 from backend.features.agent.vision.node import vision_node
 from backend.features.agent.search.node import search_node
+from backend.features.agent.price.node import price_node
 
 
 # ---------------------------------------------------------
@@ -18,6 +19,17 @@ def should_search(state: AgentState) -> str:
     return "end"
 
 
+def should_price(state: AgentState) -> str:
+    """
+    search_nodeの結果に基づいて価格検索を行うかどうかを判定する。
+    mass_productの場合のみ価格検索を実行する。
+    """
+    search_output = state.get("search_output")
+    if search_output and search_output.analysis.classification == "mass_product":
+        return "price"
+    return "end"
+
+
 # ---------------------------------------------------------
 # グラフの構築
 # ---------------------------------------------------------
@@ -26,6 +38,7 @@ workflow = StateGraph(AgentState)
 # ノードの追加
 workflow.add_node("node_vision", vision_node)
 workflow.add_node("node_search", search_node)
+workflow.add_node("node_price", price_node)
 
 # エッジの追加
 workflow.add_edge(START, "node_vision")
@@ -39,7 +52,17 @@ workflow.add_conditional_edges(
         "end": END,
     },
 )
-workflow.add_edge("node_search", END)
+
+# 条件分岐: mass_productの場合のみprice_nodeへ
+workflow.add_conditional_edges(
+    "node_search",
+    should_price,
+    {
+        "price": "node_price",
+        "end": END,
+    },
+)
+workflow.add_edge("node_price", END)
 
 app = workflow.compile()
 
@@ -116,7 +139,6 @@ async def run_vision_agent(image_data: str) -> dict:
 async def run_analyze_agent(image_data: str) -> dict:
     return await run_vision_agent(image_data)
 
-
 async def run_search_agent(image_data: str) -> dict:
     """
     画像データを受け取ってvision_node + search_nodeを実行する
@@ -148,5 +170,42 @@ async def run_search_agent(image_data: str) -> dict:
     return {
         "analysis_result": result.get("analysis_result"),
         "search_output": result.get("search_output"),
+        "debug_state": str(result),
+    }
+
+
+async def run_price_agent(image_data: str) -> dict:
+    """
+    画像データを受け取ってvision_node + search_node + price_nodeを実行する
+
+    Args:
+        image_data: Base64エンコードされた画像文字列 (例: "data:image/jpeg;base64,...")
+
+    Returns:
+        analysis_result: vision_nodeの分析結果
+        search_output: search_nodeの検索・分類結果（processableの場合のみ）
+        price_output: price_nodeの価格検索結果（mass_productの場合のみ）
+    """
+
+    message = HumanMessage(
+        content=[
+            {
+                "type": "image_url",
+                "image_url": {"url": image_data},
+            }
+        ]
+    )
+
+    initial_state = {
+        "messages": [message],
+        "retry_count": 0,
+    }
+
+    result = await app.ainvoke(initial_state)
+
+    return {
+        "analysis_result": result.get("analysis_result"),
+        "search_output": result.get("search_output"),
+        "price_output": result.get("price_output"),
         "debug_state": str(result),
     }
