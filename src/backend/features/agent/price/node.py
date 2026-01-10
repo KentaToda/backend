@@ -1,13 +1,17 @@
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage
 
+from backend.core.config import settings
+from backend.core.llm_callbacks import get_llm_callbacks
+from backend.core.logging import get_logger
 from backend.features.agent.price.schema import (
     PriceAnalysis,
     PriceNodeOutput,
     Valuation,
 )
-from backend.core.config import settings
 from backend.features.agent.state import AgentState
+
+logger = get_logger(__name__)
 
 
 def price_node(state: AgentState) -> dict:
@@ -56,6 +60,7 @@ def price_node(state: AgentState) -> dict:
         temperature=0,
         max_retries=2,
         vertexai=True,
+        callbacks=get_llm_callbacks("price.search"),
     )
 
     search_prompt = f"""
@@ -78,6 +83,15 @@ Google検索で中古市場の相場を調査し、以下の内容を含むレ�
 2. 価格のばらつきと理由（状態、付属品の有無など）
 3. 検索で見つかった具体的な情報源（メルカリ、ヤフオクなど）
 4. 同シリーズ・類似商品の相場も含めて推定できる場合はその情報
+5. 価格に影響を与える要因（年代、カラー、限定版、付属品の有無など）
+
+【価格変動要因について】
+ユーザーがフリマ出品や買取査定の参考にするため、以下のような価格変動要因を必ず調査してください:
+- 発売年・モデル年による価格差（例: 2020年モデルは○○円、2018年以前は△△円）
+- カラーバリエーションによる価格差（例: 限定カラーは+○○円）
+- 状態による価格差（例: 新品同様は○○円、使用感ありは△△円）
+- 付属品の有無による価格差（例: 箱・保証書ありで+○○円）
+- 限定版・コラボモデルの場合はその旨と価格への影響
 
 【注意】
 - 同じ商品の完全一致データがなくても、同シリーズ・同モデルの相場から推定してOK
@@ -94,7 +108,7 @@ Google検索で中古市場の相場を調査し、以下の内容を含むレ�
         # Step 1: 検索してレポート作成（Grounding + テキスト出力）
         search_response = llm_search.invoke(search_messages, tools=[{"google_search": {}}])
         search_report = search_response.content
-        print(f"=== Search Report ===\n{search_report}\n====================")
+        logger.debug(f"Search Report: {search_report}")
 
         # ========================================
         # Step 2: レポートから価格情報を抽出
@@ -106,6 +120,7 @@ Google検索で中古市場の相場を調査し、以下の内容を含むレ�
             temperature=0,
             max_retries=2,
             vertexai=True,
+            callbacks=get_llm_callbacks("price.extract"),
         )
 
         structured_llm = llm_extract.with_structured_output(PriceAnalysis)
@@ -121,7 +136,14 @@ Google検索で中古市場の相場を調査し、以下の内容を含むレ�
 2. max_price: 最高価格（円）※情報がない場合は 0
 3. confidence: "high", "medium", "low" のいずれか
 4. reasoning: 価格算出の根拠
-5. display_message: ユーザーに表示する日本語メッセージ（例: "一般的な中古相場です。"）
+5. display_message: ユーザーに表示する日本語メッセージ（例: "メルカリでの一般的な中古相場です"）
+6. price_factors: 価格に影響を与える要因のリスト（配列形式）
+
+【price_factors の出力形式】
+ユーザーがフリマ出品や買取査定の価格設定に活用できるよう、具体的な情報を出力してください:
+- 各要因は「要因: 価格への影響」の形式で記載
+- 例: ["2020年以降のモデルは8000-12000円、それ以前は5000-8000円", "箱・付属品ありで+1000-2000円", "限定カラーは通常より20%高め"]
+- 価格変動要因が見つからない場合は null
 
 【注意】
 - レポート内に価格情報がある場合は、それを min_price, max_price として抽出
@@ -137,7 +159,7 @@ Google検索で中古市場の相場を調査し、以下の内容を含むレ�
 
         # Step 2: レポートから抽出（構造化出力のみ、Grounding なし）
         analysis = structured_llm.invoke(extract_messages)
-        print(f"=== Price Analysis ===\n{analysis}\n======================")
+        logger.debug(f"Price Analysis: {analysis}")
 
         # PriceAnalysis を PriceNodeOutput に変換
         valuation = Valuation(
@@ -158,10 +180,11 @@ Google検索で中古市場の相場を調査し、以下の内容を含むレ�
                 status=status,
                 valuation=valuation,
                 display_message=analysis.display_message,
+                price_factors=analysis.price_factors,
             )
         }
     except Exception as e:
-        print(f"Price Node LLM Error: {e}")
+        logger.error(f"Price Node LLM Error: {e}", exc_info=True)
         # フォールバック: エラー状態を返す
         return {
             "price_output": PriceNodeOutput(

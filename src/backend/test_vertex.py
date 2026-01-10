@@ -1,28 +1,30 @@
-import os
 from langchain_google_vertexai import ChatVertexAI
 
+from backend.core.logging import get_logger, setup_logging
+
+logger = get_logger(__name__)
+
+
 def test_vertex():
-    print("Testing Vertex AI Connection...")
-    
-    # 環境変数からプロジェクトIDを取得 (必要であれば)
-    # project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-    
+    logger.info("Testing Vertex AI Connection...")
+
     try:
         # モデルの初期化
         # 環境変数 GOOGLE_APPLICATION_CREDENTIALS が設定されていることを前提とします
         llm = ChatVertexAI(model="gemini-1.5-flash")
-        
+
         # テストプロンプトの送信
         response = llm.invoke("Hello, Vertex AI!")
-        
-        print("\n--- Response from Vertex AI ---")
-        print(response.content)
-        print("-------------------------------\n")
-        print("Success! Connection established.")
-        
+
+        logger.info("--- Response from Vertex AI ---")
+        logger.info(response.content)
+        logger.info("-------------------------------")
+        logger.info("Success! Connection established.")
+
     except Exception as e:
-        print("\n!!! Connection Failed !!!")
-        print(e)
+        logger.error("Connection Failed!", exc_info=True)
+
 
 if __name__ == "__main__":
+    setup_logging()
     test_vertex()

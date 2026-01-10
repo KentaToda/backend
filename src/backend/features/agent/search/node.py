@@ -1,12 +1,16 @@
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage
 
+from backend.core.config import settings
+from backend.core.llm_callbacks import get_llm_callbacks
+from backend.core.logging import get_logger
 from backend.features.agent.search.schema import (
     SearchAnalysis,
     SearchNodeOutput,
 )
-from backend.core.config import settings
 from backend.features.agent.state import AgentState
+
+logger = get_logger(__name__)
 
 
 def search_node(state: AgentState) -> dict:
@@ -43,6 +47,7 @@ def search_node(state: AgentState) -> dict:
         temperature=0,
         max_retries=2,
         vertexai=True,
+        callbacks=get_llm_callbacks("search"),
     )
 
     # 構造化出力を設定
@@ -51,6 +56,10 @@ def search_node(state: AgentState) -> dict:
     system_prompt = f"""
 あなたは熟練の鑑定士AIエージェント『Ojoya』です。
 以下の商品情報を基に、Google検索で最新の市場情報を調べて、「既製品」か「一点物」かを判定してください。
+
+【このエージェントの目的】
+ユーザーがフリマアプリへの出品、買取店への持ち込み、または中古品購入の価格検討に活用できる
+「中古相場情報」を提供することです。既製品の場合は次のノードで価格検索を行います。
 
 【商品情報（vision_nodeより）】
 - 商品名: {item_name or "不明"}
@@ -61,31 +70,40 @@ def search_node(state: AgentState) -> dict:
 - この商品が市場で流通しているか
 - ECサイトや中古市場で同じ商品が販売されているか
 - 型番や正式名称が特定できるか
+- メルカリ、ヤフオク、楽天フリマなどで取引実績があるか
 
 【分類基準】
 1. mass_product (既製品):
    - ブランド品、型番商品、量産品
-   - 市場で同じ商品が流通している
-   - ECサイト等で購入可能
+   - 市場で同じ商品が流通している（新品・中古問わず）
+   - ECサイト、フリマアプリ等で購入可能または取引実績がある
+   - ※ヴィンテージ品や廃盤品でも、中古市場で流通していれば mass_product
 
 2. unique_item (一点物):
-   - 手作り品、アート作品、骨董品
-   - 市場に同じものが存在しない
-   - 職人による一品物
+   - 手作り品、アート作品、骨董品（作家物など）
+   - 市場に同じものが存在せず、相場が算出できない
+   - オーダーメイド品、職人による一品物
+   - ※単に「珍しい」「レア」だけでは一点物にしない。市場流通があれば mass_product
 
 【出力項目】
 1. classification: "mass_product" または "unique_item"
 2. confidence: "high", "medium", "low" のいずれか
-3. reasoning: 判定に至った理由（検索で見つかった情報を含める）
-4. identified_product: 既製品の場合、商品名と属性をカンマ区切りで出力。括弧は使用しない
+3. reasoning: 判定に至った理由（検索で見つかった具体的な情報を含める）
+4. identified_product: 既製品の場合、次の価格検索で使用する商品名を出力
    - vision_nodeで推定された商品名「{item_name or "不明"}」を検索で確認・補完する
-   - 型番、カラー名、サイズなどを特定できれば含める
-   - 例: "NIKE Free RN Flyknit, 赤", "NIKE Free RN Flyknit 2018, 黒, 27.0cm"
+   - 正式な商品名、型番、カラー名などを特定できれば含める
+   - カンマ区切りで属性を追加。括弧は使用しない
+   - 例: "NIKE Air Max 90, 白", "Louis Vuitton ネヴァーフル MM, ダミエ・エベヌ"
    - 一点物の場合は null
 
+【confidenceの判断基準】
+- high: 検索で同一商品の取引実績や商品ページが複数見つかった
+- medium: 同シリーズや類似商品は見つかるが、完全一致は見つからない
+- low: 関連情報が少なく、分類の確信度が低い
+
 【注意事項】
-- 確信度が低い場合は、その旨を明確にすること
-- Google検索で見つかった情報を根拠として含めること
+- 迷った場合は mass_product 寄りで判断してください（価格検索で相場が見つからなければユーザーに伝えられるため）
+- Google検索で見つかった具体的な情報（サイト名、価格帯など）を reasoning に含めてください
 """
 
     # テキストベースで検索を実行（画像なし）
@@ -107,7 +125,7 @@ def search_node(state: AgentState) -> dict:
             )
         }
     except Exception as e:
-        print(f"Search Node LLM Error: {e}")
+        logger.error(f"Search Node LLM Error: {e}", exc_info=True)
         # フォールバック: デフォルト判定
         return {
             "search_output": SearchNodeOutput(

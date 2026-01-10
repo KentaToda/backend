@@ -1,7 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.features.agent.graph import run_agent, run_vision_agent, run_search_agent, run_price_agent
+from backend.core.logging import get_logger
+from backend.features.agent.graph import (
+    run_agent,
+    run_price_agent,
+    run_search_agent,
+    run_vision_agent,
+)
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -37,7 +45,7 @@ async def test_agent(request: AgentTestRequest):
         )
 
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Agent test error: {e}", exc_info=True)
         # raise HTTPException(status_code=500, detail=str(e)) # デバッグ用に詳細出す
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -76,7 +84,7 @@ async def test_vision_agent(request: AgentVisionRequest):
         result = await run_vision_agent(image_content)
         return result
     except Exception as e:
-        print(f"Error executing vision agent: {e}")
+        logger.error(f"Vision agent error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -114,7 +122,7 @@ async def test_search_agent(request: AgentVisionRequest):
         result = await run_search_agent(image_content)
         return result
     except Exception as e:
-        print(f"Error executing search agent: {e}")
+        logger.error(f"Search agent error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -152,5 +160,5 @@ async def test_price_agent(request: AgentVisionRequest):
         result = await run_price_agent(image_content)
         return result
     except Exception as e:
-        print(f"Error executing price agent: {e}")
+        logger.error(f"Price agent error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

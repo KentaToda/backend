@@ -27,6 +27,11 @@ COPY --from=builder --chown=nonroot:nonroot /python /python
 # アプリケーションをコピー
 COPY --from=builder --chown=nonroot:nonroot /app /app
 ENV PATH="/app/.venv/bin:$PATH"
+
+# 本番環境のデフォルト設定
+ENV ENVIRONMENT=production
+ENV LOG_LEVEL=INFO
+
 USER nonroot
 WORKDIR /app
 # 本番モードで起動
