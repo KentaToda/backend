@@ -1,4 +1,15 @@
 # 開発用 Dockerfile
+# プロジェクトルートからビルド: docker build -f backend/dockerfile .
+
+# ステージ1: フロントエンドビルド
+FROM node:20-slim AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ステージ2: バックエンド
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # 非rootユーザーの作成
@@ -21,15 +32,18 @@ USER nonroot
 
 # 依存関係のインストール
 RUN --mount=type=cache,target=/home/nonroot/.cache/uv,uid=999,gid=999 \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=backend/uv.lock,target=uv.lock \
+    --mount=type=bind,source=backend/pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project
 
 # ソースコードをコピーしてインストール（--chown で所有権設定）
-COPY --chown=nonroot:nonroot . /app
+COPY --chown=nonroot:nonroot backend/ /app/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
- 
+
+# フロントエンドのビルド済みファイルをコピー
+COPY --from=frontend-builder --chown=nonroot:nonroot /frontend/dist /app/frontend/dist
+
 ENV PATH="/app/.venv/bin:$PATH"
 
 ENTRYPOINT []

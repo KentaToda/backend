@@ -43,13 +43,16 @@ app.add_middleware(
 # ルーターをアプリケーションに登録
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 静的ファイルのパス設定（frontend/ディレクトリ）
-# backend/src/backend/main.py から ../../../frontend へのパス
-FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend"
+# 静的ファイルのパス設定（frontend/dist/ディレクトリ）
+# 本番: /app/frontend/dist、開発: ../frontend/dist
+FRONTEND_DIST_DIR = Path("/app/frontend/dist")
+if not FRONTEND_DIST_DIR.exists():
+    # 開発環境: backend/src/backend/main.py から ../../../frontend/dist へのパス
+    FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
 
-# 静的ファイルの配信設定（frontendディレクトリが存在する場合のみ）
-if FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
+# 静的ファイルの配信設定（frontend/distディレクトリが存在する場合のみ）
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="static")
 
 
 # ローカルデバッグ用 (python app/main.py で起動する場合)

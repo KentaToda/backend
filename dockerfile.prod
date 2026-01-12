@@ -1,5 +1,24 @@
 # 本番用 Dockerfile (standalone)
-# ステージ1: ビルダー
+# プロジェクトルートからビルド: docker build -f backend/dockerfile.prod .
+
+# ステージ1: フロントエンドビルド
+FROM node:20-slim AS frontend-builder
+WORKDIR /frontend
+
+# ビルド時の環境変数（Cloud Buildから渡される）
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY
+ENV VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN
+ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
+
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ステージ2: バックエンドビルダー
 FROM ghcr.io/astral-sh/uv:bookworm-slim AS builder
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 ENV UV_NO_DEV=1
@@ -11,13 +30,14 @@ RUN uv python install 3.12
 WORKDIR /app
 # 依存関係のインストール
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=backend/uv.lock,target=uv.lock \
+    --mount=type=bind,source=backend/pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project
-COPY . /app
+COPY backend/ /app/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
-# ステージ2: 本番イメージ
+
+# ステージ3: 本番イメージ
 FROM debian:bookworm-slim
 # 非rootユーザーの作成
 RUN groupadd --system --gid 999 nonroot \
@@ -26,6 +46,8 @@ RUN groupadd --system --gid 999 nonroot \
 COPY --from=builder --chown=nonroot:nonroot /python /python
 # アプリケーションをコピー
 COPY --from=builder --chown=nonroot:nonroot /app /app
+# フロントエンドのビルド済みファイルをコピー
+COPY --from=frontend-builder --chown=nonroot:nonroot /frontend/dist /app/frontend/dist
 ENV PATH="/app/.venv/bin:$PATH"
 
 # 本番環境のデフォルト設定

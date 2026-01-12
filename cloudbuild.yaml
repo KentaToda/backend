@@ -1,0 +1,29 @@
+substitutions:
+  _VITE_FIREBASE_API_KEY: ''
+  _VITE_FIREBASE_AUTH_DOMAIN: ''
+  _VITE_FIREBASE_PROJECT_ID: ''
+
+steps:
+  # プロジェクトルートからDockerイメージをビルド
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-northeast1-docker.pkg.dev/ojoya-483609/ojoya/api:latest'
+      - '-f'
+      - 'backend/dockerfile.prod'
+      - '--build-arg'
+      - 'VITE_FIREBASE_API_KEY=${_VITE_FIREBASE_API_KEY}'
+      - '--build-arg'
+      - 'VITE_FIREBASE_AUTH_DOMAIN=${_VITE_FIREBASE_AUTH_DOMAIN}'
+      - '--build-arg'
+      - 'VITE_FIREBASE_PROJECT_ID=${_VITE_FIREBASE_PROJECT_ID}'
+      - '.'
+    env:
+      - 'DOCKER_BUILDKIT=1'
+
+images:
+  - 'asia-northeast1-docker.pkg.dev/ojoya-483609/ojoya/api:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
