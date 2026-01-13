@@ -1,14 +1,22 @@
+import asyncio
+import json
+import time
 import uuid
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.core.firebase import AuthError, get_current_user_id
 from backend.core.firestore import firestore_client
 from backend.core.logging import get_logger
 from backend.core.storage import storage_client
-from backend.features.agent.graph import run_price_agent
+from backend.features.agent.graph import (
+    run_price_agent,
+    stream_price_agent,
+    stream_price_agent_with_thinking,
+)
 
 logger = get_logger(__name__)
 
@@ -257,4 +265,168 @@ def _build_response(
             reasoning=search_analysis.reasoning,
         ),
         price_factors=price_output.price_factors,
+    )
+
+
+# --- Streaming Endpoint ---
+
+
+@router.post("/analyze/stream")
+async def analyze_image_stream(
+    request: AnalyzeRequest,
+    authorization: Optional[str] = Header(None, description="Bearer token"),
+):
+    """
+    画像をアップロードしてAI鑑定を実行するストリーミングエンドポイント
+
+    SSE (Server-Sent Events) でリアルタイムにAIの思考過程を配信します。
+    各ノード（vision, search, price）の思考過程を行単位でストリーミングし、
+    最後に complete イベントで査定結果を返します。
+    """
+    user_id: Optional[str] = None
+
+    # 認証処理（オプション）
+    if authorization:
+        try:
+            user_id = await get_current_user_id(authorization)
+            await firestore_client.get_or_create_user(user_id, request.platform)
+            logger.info(f"Authenticated user: {user_id}")
+        except AuthError as e:
+            logger.warning(f"Auth failed: {e.code} - {e.message}")
+            raise HTTPException(status_code=401, detail=e.message)
+
+    async def event_generator():
+        """SSE イベントジェネレーター"""
+        thinking_queue: asyncio.Queue = asyncio.Queue()
+
+        # エージェント実行タスクを開始
+        agent_task = asyncio.create_task(
+            stream_price_agent_with_thinking(request.image_base64, thinking_queue)
+        )
+
+        try:
+            # キューからイベントを取得してSSEで送信
+            while True:
+                try:
+                    # タイムアウト付きでキューから取得
+                    event = await asyncio.wait_for(thinking_queue.get(), timeout=60.0)
+
+                    # SSEイベントを構築
+                    sse_event = {
+                        "type": event.get("type"),
+                        "node": event.get("node"),
+                        "timestamp": int(time.time() * 1000),
+                    }
+
+                    if event["type"] == "thinking":
+                        sse_event["message"] = event.get("content", "")
+                    elif event["type"] == "node_start":
+                        sse_event["message"] = event.get("message", "")
+                    elif event["type"] == "node_complete":
+                        sse_event["data"] = event.get("data", {})
+                    elif event["type"] == "error":
+                        sse_event["message"] = event.get("message", "")
+
+                    yield f"data: {json.dumps(sse_event, ensure_ascii=False)}\n\n"
+
+                    # node_end イベントはエージェント内部で使用
+                    # エラーイベントを受け取ったらログ出力のみ
+                    if event["type"] == "error":
+                        logger.warning(f"Node error: {event}")
+
+                except asyncio.TimeoutError:
+                    # タイムアウトしたらエージェントが完了したかチェック
+                    if agent_task.done():
+                        break
+                    continue
+
+                # エージェントタスクが完了したらループを抜ける
+                if agent_task.done():
+                    # 残りのイベントを処理
+                    while not thinking_queue.empty():
+                        event = thinking_queue.get_nowait()
+                        sse_event = {
+                            "type": event.get("type"),
+                            "node": event.get("node"),
+                            "timestamp": int(time.time() * 1000),
+                        }
+                        if event["type"] == "thinking":
+                            sse_event["message"] = event.get("content", "")
+                        elif event["type"] in ["node_start", "error"]:
+                            sse_event["message"] = event.get("message", "")
+                        elif event["type"] == "node_complete":
+                            sse_event["data"] = event.get("data", {})
+
+                        yield f"data: {json.dumps(sse_event, ensure_ascii=False)}\n\n"
+                    break
+
+            # エージェントの結果を取得
+            result = await agent_task
+            analysis_result = result.get("analysis_result")
+            search_output = result.get("search_output")
+            price_output = result.get("price_output")
+
+            # 最終結果を構築
+            response = _build_response(analysis_result, search_output, price_output)
+
+            # 認証済みユーザーの場合は保存
+            if user_id:
+                appraisal_id = str(uuid.uuid4())
+
+                image_path = None
+                try:
+                    image_path = await storage_client.upload_image(
+                        user_id=user_id,
+                        appraisal_id=appraisal_id,
+                        image_base64=request.image_base64,
+                    )
+                    logger.info(f"Uploaded image: {image_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to upload image: {e}")
+
+                await firestore_client.save_appraisal(
+                    user_id=user_id,
+                    appraisal_id=appraisal_id,
+                    vision_result=analysis_result.model_dump() if analysis_result else None,
+                    search_result=search_output.model_dump() if search_output else None,
+                    price_result=price_output.model_dump() if price_output else None,
+                    image_path=image_path,
+                    user_comment=request.user_comment or None,
+                )
+                response.appraisal_id = appraisal_id
+                logger.info(f"Saved appraisal: {appraisal_id}")
+
+            # 完了イベントを送信
+            complete_event = {
+                "type": "complete",
+                "result": response.model_dump(),
+                "timestamp": int(time.time() * 1000),
+            }
+            yield f"data: {json.dumps(complete_event, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Streaming endpoint error: {e}", exc_info=True)
+            error_event = {
+                "type": "error",
+                "message": "査定処理中にエラーが発生しました",
+                "timestamp": int(time.time() * 1000),
+            }
+            yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+        finally:
+            # タスクがまだ実行中なら キャンセル
+            if not agent_task.done():
+                agent_task.cancel()
+                try:
+                    await agent_task
+                except asyncio.CancelledError:
+                    pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # nginx でバッファリングを無効化
+        },
     )
