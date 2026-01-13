@@ -13,6 +13,7 @@ from google.cloud.firestore_v1.collection import CollectionReference
 
 from backend.core.firebase import initialize_firebase
 from backend.core.logging import get_logger
+from backend.core.storage import storage_client
 
 
 # 型定義
@@ -234,8 +235,9 @@ class FirestoreClient:
         vision_result: Optional[dict],
         search_result: Optional[dict] = None,
         price_result: Optional[dict] = None,
-        image_url: Optional[str] = None,
+        image_path: Optional[str] = None,
         user_comment: Optional[str] = None,
+        appraisal_id: Optional[str] = None,
     ) -> str:
         """
         査定結果をFirestoreに保存
@@ -245,15 +247,17 @@ class FirestoreClient:
             vision_result: VisionNodeの出力（dict形式）
             search_result: SearchNodeの出力（dict形式、オプション）
             price_result: PriceNodeの出力（dict形式、オプション）
-            image_url: Cloud Storage上の画像URL（オプション）
+            image_path: Cloud Storage上の画像パス（オプション）
             user_comment: ユーザーからの補足コメント（オプション）
+            appraisal_id: 査定ID（指定しない場合は自動生成）
 
         Returns:
             作成された査定ドキュメントのID
         """
-        # ドキュメントID生成（タイムスタンプ + UUID で時系列ソートに有利）
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        appraisal_id = f"{timestamp}_{uuid.uuid4().hex[:8]}"
+        # ドキュメントID生成（指定がなければタイムスタンプ + UUID）
+        if appraisal_id is None:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            appraisal_id = f"{timestamp}_{uuid.uuid4().hex[:8]}"
 
         # 終了ポイントとステータスを判定
         termination_point = self._determine_termination_point(
@@ -271,8 +275,8 @@ class FirestoreClient:
         }
 
         # 入力情報
-        if image_url:
-            appraisal_doc["image_url"] = image_url
+        if image_path:
+            appraisal_doc["image_path"] = image_path
         if user_comment:
             appraisal_doc["user_comment"] = user_comment
 
@@ -337,6 +341,19 @@ class FirestoreClient:
         self._logger.info(f"Saved appraisal: users/{user_id}/appraisals/{appraisal_id}")
         return appraisal_id
 
+    def _add_image_url(self, appraisal: dict[str, Any]) -> dict[str, Any]:
+        """
+        査定データにimage_pathがあれば署名付きURLを追加
+        """
+        if appraisal.get("image_path"):
+            try:
+                appraisal["image_url"] = storage_client.get_signed_url(
+                    appraisal["image_path"]
+                )
+            except Exception as e:
+                self._logger.warning(f"Failed to generate signed URL: {e}")
+        return appraisal
+
     async def get_appraisal_history(
         self,
         user_id: str,
@@ -352,7 +369,7 @@ class FirestoreClient:
             offset: スキップ件数（デフォルト0）
 
         Returns:
-            査定履歴のリスト（新しい順）
+            査定履歴のリスト（新しい順、image_url付き）
         """
         self._logger.info(f"GET appraisal history: users/{user_id}/appraisals")
 
@@ -366,7 +383,10 @@ class FirestoreClient:
         )
 
         docs = query.stream()
-        return [doc.to_dict() for doc in docs]
+        appraisals = [doc.to_dict() for doc in docs]
+
+        # 署名付きURLを追加
+        return [self._add_image_url(a) for a in appraisals]
 
     async def get_appraisal(
         self,
@@ -381,7 +401,7 @@ class FirestoreClient:
             appraisal_id: 査定ドキュメントID
 
         Returns:
-            査定ドキュメントのデータ、存在しない場合はNone
+            査定ドキュメントのデータ（image_url付き）、存在しない場合はNone
         """
         self._logger.info(f"GET users/{user_id}/appraisals/{appraisal_id}")
 
@@ -394,7 +414,8 @@ class FirestoreClient:
         )
 
         if doc.exists:
-            return doc.to_dict()
+            appraisal = doc.to_dict()
+            return self._add_image_url(appraisal)
         return None
 
 

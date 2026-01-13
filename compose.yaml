@@ -1,7 +1,9 @@
 services:
   # 開発用
   dev:
-    build: .
+    build:
+      context: ..
+      dockerfile: backend/dockerfile
     ports:
       - "8000:8000"
     environment:

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Firebase設定（オプション - ADC使用時は不要）
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
 
+    # Cloud Storage設定
+    GCS_BUCKET_NAME: str = "ojoya-images-dev"  # 本番: ojoya-images-prod
+    GCS_IMAGE_EXPIRATION_MINUTES: int = 60  # 署名付きURLの有効期限
+
     # CORS設定
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 

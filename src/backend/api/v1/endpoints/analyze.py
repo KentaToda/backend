@@ -1,3 +1,4 @@
+import uuid
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -6,6 +7,7 @@ from pydantic import BaseModel, Field
 from backend.core.firebase import AuthError, get_current_user_id
 from backend.core.firestore import firestore_client
 from backend.core.logging import get_logger
+from backend.core.storage import storage_client
 from backend.features.agent.graph import run_price_agent
 
 logger = get_logger(__name__)
@@ -113,11 +115,29 @@ async def analyze_image(
 
         # 認証済みユーザーの場合は保存
         if user_id:
-            appraisal_id = await firestore_client.save_appraisal(
+            # 査定IDを先に生成
+            appraisal_id = str(uuid.uuid4())
+
+            # 画像をCloud Storageにアップロード
+            image_path = None
+            try:
+                image_path = await storage_client.upload_image(
+                    user_id=user_id,
+                    appraisal_id=appraisal_id,
+                    image_base64=request.image_base64,
+                )
+                logger.info(f"Uploaded image: {image_path}")
+            except Exception as e:
+                logger.warning(f"Failed to upload image: {e}")
+                # 画像アップロード失敗でも査定は続行
+
+            await firestore_client.save_appraisal(
                 user_id=user_id,
+                appraisal_id=appraisal_id,
                 vision_result=analysis_result.model_dump() if analysis_result else None,
                 search_result=search_output.model_dump() if search_output else None,
                 price_result=price_output.model_dump() if price_output else None,
+                image_path=image_path,
                 user_comment=request.user_comment or None,
             )
             response.appraisal_id = appraisal_id

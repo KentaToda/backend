@@ -5,7 +5,7 @@
 FROM node:20-slim AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN npm ci --omit=optional
 COPY frontend/ ./
 RUN npm run build
 
@@ -14,7 +14,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # 非rootユーザーの作成
 RUN groupadd --system --gid 999 nonroot \
- && useradd --system --gid 999 --uid 999 --create-home nonroot
+    && useradd --system --gid 999 --uid 999 --create-home nonroot
 
 WORKDIR /app
 
