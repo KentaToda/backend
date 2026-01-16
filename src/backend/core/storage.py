@@ -160,6 +160,46 @@ class StorageClient:
             logger.error(f"Failed to delete image: {e}", exc_info=True)
             return False
 
+    async def upload_temp_image_for_serpapi(
+        self,
+        image_base64: str,
+    ) -> str:
+        """
+        SerpApi用に一時画像をアップロードし、署名付きURLを返す
+
+        Args:
+            image_base64: Base64エンコードされた画像
+
+        Returns:
+            署名付きURL（短い有効期限）
+        """
+        import uuid
+
+        try:
+            # Base64デコード（WebP変換はしない - SerpApiへそのまま送信）
+            image_bytes = self._decode_base64_image(image_base64)
+
+            # 一時パス
+            temp_id = str(uuid.uuid4())
+            temp_path = f"temp/serpapi/{temp_id}.jpg"
+
+            # アップロード
+            blob = self.bucket.blob(temp_path)
+            blob.upload_from_string(image_bytes, content_type="image/jpeg")
+
+            # 短い有効期限の署名付きURL生成
+            url = blob.generate_signed_url(
+                expiration=timedelta(minutes=settings.SERPAPI_IMAGE_EXPIRATION_MINUTES),
+                method="GET",
+            )
+
+            logger.info(f"Uploaded temp image for SerpApi: {temp_path}")
+            return url
+
+        except Exception as e:
+            logger.error(f"Failed to upload temp image for SerpApi: {e}", exc_info=True)
+            raise
+
 
 # シングルトンインスタンス
 storage_client = StorageClient()

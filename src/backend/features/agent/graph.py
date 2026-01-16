@@ -295,88 +295,90 @@ async def stream_price_agent_with_thinking(
     }
 
     # ========================================
-    # Vision Node (2段階: 思考ストリーム → 構造化出力)
+    # Vision Node (SerpApi Google Lens統合)
     # ========================================
+    from backend.core.serpapi import serpapi_client
+    from backend.core.storage import storage_client
+    from backend.features.agent.vision.node import (
+        _extract_image_base64_from_messages,
+        _map_lens_result_to_analysis,
+        _check_guardrails,
+    )
+
     await thinking_queue.put({
         "type": "node_start",
         "node": "vision",
-        "message": "画像を解析しています...",
+        "message": "Google Lensで商品を検索しています...",
     })
 
-    vision_thinking_prompt = """
-あなたは熟練の鑑定士AIエージェント『Ojoya』の「目」です。
-ユーザーから送られた画像を分析してください。
-
-【タスク】
-画像を見て、あなたの分析過程を日本語で説明してください。
-以下の観点で考えを述べてください:
-
-1. 画像に何が写っているか
-2. ブランドやメーカーの特定（ロゴ、刻印、デザインの特徴から）
-3. 商品名やモデル名の推定
-4. 色、素材、状態の観察
-5. 査定可能かどうかの判断
-
-考えを述べながら分析を進めてください。
-"""
-
     try:
-        # Step 1: 思考過程をストリーミング
-        streaming_handler = StreamingCallbackHandler(thinking_queue, "vision")
-        thinking_llm = ChatGoogleGenerativeAI(
-            model=settings.MODEL_VISION_NODE,
-            project=settings.GCP_PROJECT_ID,
-            location=settings.GCP_LOCATION,
-            temperature=0.3,
-            max_retries=2,
-            vertexai=True,
-            streaming=True,
-            callbacks=[streaming_handler],
+        # Step 1: 画像Base64を抽出
+        image_base64 = _extract_image_base64_from_messages([message])
+        if not image_base64:
+            raise ValueError("画像が見つかりませんでした")
+
+        await thinking_queue.put({
+            "type": "thinking",
+            "node": "vision",
+            "content": "画像をアップロード中...",
+        })
+
+        # Step 2: SerpApi用に画像をGCSにアップロード
+        image_url = await storage_client.upload_temp_image_for_serpapi(image_base64)
+
+        await thinking_queue.put({
+            "type": "thinking",
+            "node": "vision",
+            "content": "Google Lensで類似商品を検索中...",
+        })
+
+        # Step 3: ガードレールチェックを並行で開始
+        guardrail_task = asyncio.create_task(_check_guardrails([message]))
+
+        # Step 4: SerpApi Google Lens検索
+        lens_result = await serpapi_client.search_by_image_url(
+            image_url=image_url,
+            search_type="products",
         )
 
-        thinking_messages = [
-            SystemMessage(content=vision_thinking_prompt),
-            message,
-        ]
+        # 検索結果を通知
+        if lens_result.has_matches:
+            match_count = len(lens_result.visual_matches)
+            item_name = lens_result.get_item_name() or "商品"
+            await thinking_queue.put({
+                "type": "thinking",
+                "node": "vision",
+                "content": f"{match_count}件の類似商品を発見しました。\n商品名候補: {item_name}",
+            })
+        else:
+            await thinking_queue.put({
+                "type": "thinking",
+                "node": "vision",
+                "content": "類似商品が見つかりませんでした。",
+            })
 
-        # 思考過程を出力（ストリーミング）
-        await thinking_llm.ainvoke(thinking_messages)
+        # Step 5: ガードレールチェック完了を待機
+        await thinking_queue.put({
+            "type": "thinking",
+            "node": "vision",
+            "content": "安全性チェック中...",
+        })
 
-        # Step 2: 構造化出力で結果を抽出
-        structured_llm = ChatGoogleGenerativeAI(
-            model=settings.MODEL_VISION_NODE,
-            project=settings.GCP_PROJECT_ID,
-            location=settings.GCP_LOCATION,
-            temperature=0,
-            max_retries=2,
-            vertexai=True,
-        ).with_structured_output(InitialAnalysis)
+        guardrail_result = await guardrail_task
+        if guardrail_result:
+            result["analysis_result"] = guardrail_result
+            await thinking_queue.put({
+                "type": "node_complete",
+                "node": "vision",
+                "data": {
+                    "category_type": guardrail_result.category_type,
+                    "item_name": None,
+                },
+            })
+            return result
 
-        vision_system_prompt = """
-あなたは熟練の鑑定士AIエージェント『Ojoya』の「目」です。
-ユーザーから送られた画像を分析し、以下のルールに従って厳密に分類してください。
-
-【分類ルール】
-1. prohibited (禁止物): 人物の顔が明確、個人情報、現金、生きている動植物
-2. unknown (不明): 暗い、ピンボケ、見切れ、判別不能
-3. processable (査定可能): 上記以外の有効な商品画像
-
-【processableの場合】
-- item_name: ブランド名 + 商品名/シリーズ名（型番があれば含める）
-- visual_features: 色、素材、状態、付属品などをリストで
-
-【confidence】
-- high: ブランド・商品名が明確に特定できる
-- medium: カテゴリは分かるが詳細不明確
-- low: 大まかな分類のみ可能
-"""
-
-        structured_messages = [
-            SystemMessage(content=vision_system_prompt),
-            message,
-        ]
-
-        analysis_result = await structured_llm.ainvoke(structured_messages)
+        # Step 6: Google Lens結果をマッピング
+        analysis_result = _map_lens_result_to_analysis(lens_result)
         result["analysis_result"] = analysis_result
 
         await thinking_queue.put({

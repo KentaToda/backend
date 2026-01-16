@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     # Firebase設定（オプション - ADC使用時は不要）
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
 
+    # SerpApi設定
+    SERPAPI_API_KEY: str = ""  # .envで設定必須
+    SERPAPI_TIMEOUT_SECONDS: int = 30
+    SERPAPI_IMAGE_EXPIRATION_MINUTES: int = 5  # SerpApi用一時URL有効期限
+
+    # ガードレール設定
+    MODEL_GUARDRAIL: str = "gemini-2.0-flash"  # 軽量モデル
+    ENABLE_GUARDRAIL_CHECK: bool = True
+
     # Cloud Storage設定
     GCS_BUCKET_NAME: str = "ojoya-images-dev"  # 本番: ojoya-images-prod
     GCS_IMAGE_EXPIRATION_MINUTES: int = 60  # 署名付きURLの有効期限
